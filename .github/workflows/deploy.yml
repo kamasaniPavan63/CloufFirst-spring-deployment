@@ -1,9 +1,13 @@
 name: Spring Boot CI/CD
 
 on:
-  push:
+  pull_request:
     branches:
       - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 jobs:
   build-and-deploy:
@@ -48,10 +52,39 @@ jobs:
           docker push \
             202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ github.sha }}
 
-      # 7. Deploy to ECS
-      - name: Deploy to ECS
+      # 7. Get current ECS task definition
+      - name: Get ECS task definition
         run: |
-          aws ecs update-service \
-            --cluster spring-cluster \
-            --service spring-service \
-            --force-new-deployment
+          aws ecs describe-task-definition \
+            --task-definition spring-task \
+            --region eu-north-1 \
+            --query taskDefinition \
+            --output json > task-definition.json
+
+          jq 'del(
+            .taskDefinitionArn,
+            .revision,
+            .status,
+            .requiresAttributes,
+            .compatibilities,
+            .registeredAt,
+            .registeredBy
+          )' task-definition.json > task-definition-clean.json
+
+      # 8. Update container image in task definition
+      - name: Update ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition-clean.json
+          container-name: spring-container
+          image: 202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ github.sha }}
+
+      # 9. Deploy new task definition to ECS
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: spring-service
+          cluster: spring-cluster
+          wait-for-service-stability: true
