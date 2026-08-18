@@ -14,18 +14,14 @@ jobs:
     runs-on: self-hosted
 
     steps:
-
-      # 1. Get source code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Build Spring Boot application
       - name: Build application
         run: |
           chmod +x mvnw
           ./mvnw clean package -DskipTests
 
-      # 3. Configure AWS credentials
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -33,27 +29,36 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 4. Login to ECR
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region eu-north-1 |
-          docker login --username AWS --password-stdin \
-          202029085969.dkr.ecr.eu-north-1.amazonaws.com
+          docker login --username AWS --password-stdin 202029085969.dkr.ecr.eu-north-1.amazonaws.com
 
-      # 5. Build Docker image
+      - name: Set image tag
+        run: |
+          if aws ecr describe-images \
+            --repository-name spring-app \
+            --image-ids imageTag=latest \
+            --region eu-north-1 >/dev/null 2>&1
+          then
+            echo "IMAGE_TAG=dev" >> "$GITHUB_ENV"
+            echo "Using dev tag"
+          else
+            echo "IMAGE_TAG=latest" >> "$GITHUB_ENV"
+            echo "Using latest tag"
+          fi
+
       - name: Build Docker image
         run: |
           docker build \
-            -t 202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ github.sha }} .
+            -t 202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${IMAGE_TAG} .
 
-      # 6. Push Docker image to ECR
       - name: Push Docker image
         run: |
           docker push \
-            202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ github.sha }}
+            202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${IMAGE_TAG}
 
-      # 7. Get current ECS task definition
-      - name: Get ECS task definition
+      - name: Get current ECS task definition
         run: |
           aws ecs describe-task-definition \
             --task-definition spring-task \
@@ -71,16 +76,14 @@ jobs:
             .registeredBy
           )' task-definition.json > task-definition-clean.json
 
-      # 8. Update container image in task definition
       - name: Update ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition-clean.json
           container-name: spring-container
-          image: 202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ github.sha }}
+          image: 202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ env.IMAGE_TAG }}
 
-      # 9. Deploy new task definition to ECS
       - name: Deploy to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
