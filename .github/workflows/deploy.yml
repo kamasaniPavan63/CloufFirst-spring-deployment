@@ -88,6 +88,6 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: spring-service
+          service: pavan-service
           cluster: spring-cluster
           wait-for-service-stability: true
