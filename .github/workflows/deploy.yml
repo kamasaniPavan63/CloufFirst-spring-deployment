@@ -1,3 +1,4 @@
+```yaml
 name: Spring Boot CI/CD
 
 on:
@@ -40,20 +41,38 @@ jobs:
           docker login --username AWS --password-stdin \
           202029085969.dkr.ecr.eu-north-1.amazonaws.com
 
-      # 5. Build Docker image
+      # 5. Decide image tag
+      # First pipeline run  -> latest
+      # Later pipeline runs -> dev
+      - name: Set image tag
+        id: image-tag
+        run: |
+          if aws ecr describe-images \
+            --repository-name spring-app \
+            --image-ids imageTag=latest \
+            --region eu-north-1 >/dev/null 2>&1
+          then
+            echo "IMAGE_TAG=dev" >> "$GITHUB_ENV"
+            echo "Latest image already exists. Using dev tag."
+          else
+            echo "IMAGE_TAG=latest" >> "$GITHUB_ENV"
+            echo "Latest image does not exist. Using latest tag for first deployment."
+          fi
+
+      # 6. Build Docker image
       - name: Build Docker image
         run: |
           docker build \
-            -t 202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ github.sha }} .
+            -t 202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${IMAGE_TAG} .
 
-      # 6. Push Docker image to ECR
+      # 7. Push Docker image to ECR
       - name: Push Docker image
         run: |
           docker push \
-            202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ github.sha }}
+            202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${IMAGE_TAG}
 
-      # 7. Get current ECS task definition
-      - name: Get ECS task definition
+      # 8. Get current ECS task definition
+      - name: Get current ECS task definition
         run: |
           aws ecs describe-task-definition \
             --task-definition spring-task \
@@ -71,16 +90,16 @@ jobs:
             .registeredBy
           )' task-definition.json > task-definition-clean.json
 
-      # 8. Update container image in task definition
+      # 9. Update container image in task definition
       - name: Update ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition-clean.json
           container-name: spring-container
-          image: 202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ github.sha }}
+          image: 202029085969.dkr.ecr.eu-north-1.amazonaws.com/spring-app:${{ env.IMAGE_TAG }}
 
-      # 9. Deploy new task definition to ECS
+      # 10. Deploy to existing ECS service
       - name: Deploy to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
@@ -88,3 +107,5 @@ jobs:
           service: spring-service
           cluster: spring-cluster
           wait-for-service-stability: true
+```
+
